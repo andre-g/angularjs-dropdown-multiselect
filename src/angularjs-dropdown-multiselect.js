@@ -10,7 +10,7 @@ directiveModule.directive('mfDropdownStaticInclude', ['$compile', function($comp
 	};
 }]);
 
-directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$compile', '$parse', function($filter, $document, $compile, $parse) {
+directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$compile', '$parse', function($filter, $document, $timeout, $compile, $parse) {
 	return {
 		restrict: 'AE',
 		scope: {
@@ -25,6 +25,7 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 		},
 		template: function(element, attrs) {
 			var checkboxes = attrs.checkboxes ? true : false;
+			var radio = attrs.radio ? true : false;
 			var groups = attrs.groupBy ? true : false;
 
 			var template = '<div class="multiselect-parent btn-group dropdown-multiselect" ng-class="{open: open}">';
@@ -49,10 +50,16 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 				template += '<li ng-class="{\'active\': isChecked(getPropertyForObject(option,settings.idProp)) && settings.styleActive}" role="presentation" ng-repeat="option in options | filter:getFilter(input.searchFilter)">';
 			}
 
-			template += '<a ng-keydown="option.disabled || keyDownLink($event)" role="menuitem" class="option" tabindex="-1" ng-click="option.disabled || setSelectedItem(getPropertyForObject(option,settings.idProp), false, true)" ng-disabled="option.disabled">';
+			if (radio) {
+				template += '<a ng-keydown="option.disabled || keyDownLink($event)" role="menuitem" class="option" tabindex="-1" ng-click="option.disabled || setRadioItem(getPropertyForObject(option,settings.idProp), true)" ng-disabled="option.disabled">';
+			} else {
+				template += '<a ng-keydown="option.disabled || keyDownLink($event)" role="menuitem" class="option" tabindex="-1" ng-click="option.disabled || setSelectedItem(getPropertyForObject(option,settings.idProp), false, true)" ng-disabled="option.disabled">';
+			}
 
 			if (checkboxes) {
 				template += '<div class="checkbox"><label><input class="checkboxInput" type="checkbox" ng-click="checkboxClick($event, getPropertyForObject(option,settings.idProp))" ng-checked="isChecked(getPropertyForObject(option,settings.idProp))" /> <span mf-dropdown-static-include="{{settings.template}}"></div></label></span></a>';
+			} else if (radio) {
+				template += '<div class="checkbox"><label><input name="{{getPropertyForObject(option, settings.groupBy)}}" class="checkboxInput" type="radio" ng-click="radioClick($event, getPropertyForObject(option,settings.idProp))" ng-checked="isChecked(getPropertyForObject(option,settings.idProp))" /> <span mf-dropdown-static-include="{{settings.template}}"></div></label></span></a>';
 			} else {
 				template += '<span data-ng-class="{\'glyphicon glyphicon-ok\': isChecked(getPropertyForObject(option,settings.idProp))}"> </span> <span mf-dropdown-static-include="{{settings.template}}"></span></a>';
 			}
@@ -71,9 +78,7 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 			var $dropdownTrigger = $element.children()[0];
 
 			$scope.toggleDropdown = function() {
-        if ($scope.open) {
-          $scope.close()
-        } else { $scope.open = true }
+				$scope.open = !$scope.open;
 				if ($scope.settings.keyboardControls) {
 					if ($scope.open) {
 						if ($scope.settings.selectionLimit === 1 && $scope.settings.enableSearch) {
@@ -89,6 +94,11 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 				}
 			};
 
+			$scope.radioClick = function ($event, id) {
+				$scope.setRadioItem(id, true);
+				$event.stopImmediatePropagation();
+			}
+
 			$scope.checkboxClick = function($event, id) {
 				$scope.setSelectedItem(id, false, true);
 				$event.stopImmediatePropagation();
@@ -101,8 +111,7 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 				onDeselectAll: angular.noop,
 				onInitDone: angular.noop,
 				onMaxSelectionReached: angular.noop,
-				onSelectionChanged: angular.noop,
-				onClose: angular.noop
+				onSelectionChanged: angular.noop
 			};
 
 			$scope.settings = {
@@ -164,11 +173,6 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 				}
 			});
 
-			$scope.close = function(){
-				$scope.open = false;
-				$scope.externalEvents.onClose();
-			}
-
 			$scope.selectCurrentGroup = function(currentGroup) {
 				$scope.selectedModel.splice(0, $scope.selectedModel.length);
 				if ($scope.orderedItems) {
@@ -228,7 +232,7 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 
 						if (!parentFound) {
 							$scope.$apply(function() {
-								$scope.close();
+								$scope.open = false;
 							});
 						}
 					}
@@ -288,7 +292,7 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 					return object[property];
 				}
 
-				return undefined;
+				return '';
 			};
 
 			$scope.selectAll = function() {
@@ -320,6 +324,55 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 					$scope.externalEvents.onSelectionChanged();
 				}
 				$scope.selectedGroup = null;
+			}
+
+			$scope.setRadioItem = function(id, fireSelectionChange) {
+				var findObj = getFindObj(id);
+				var finalObj = null;
+
+				if ($scope.settings.externalIdProp === '') {
+					finalObj = find($scope.options, findObj);
+				} else {
+					finalObj = findObj;
+				}
+
+				if ($scope.singleSelection) {
+					clearObject($scope.selectedModel);
+					angular.extend($scope.selectedModel, finalObj);
+					$scope.externalEvents.onItemSelect(finalObj);
+					if ($scope.settings.closeOnSelect || $scope.settings.closeOnDeselect) $scope.open = false;
+				} else {
+					var exists = findIndex($scope.selectedModel, findObj) !== -1;
+
+					if (exists) {
+						$scope.selectedModel.splice(findIndex($scope.selectedModel, findObj), 1);
+						$scope.externalEvents.onItemDeselect(findObj);
+						if ($scope.settings.closeOnDeselect) $scope.open = false;
+					} else if (!exists && ($scope.settings.selectionLimit === 0 || $scope.selectedModel.length < $scope.settings.selectionLimit)) {
+						var index = -1;
+						for (var k = 0; k < $scope.selectedModel.length; ++k) {
+							console.log($scope.selectedModel[k]);
+							console.log(findObj);
+							if ($scope.selectedModel[k].id.slice(-1) === findObj.id.slice(-1)) {
+								index = k;
+								break;
+							}
+						}
+						if (index >= 0) {
+							$scope.selectedModel.splice(index, 1);
+						}
+						$scope.selectedModel.push(finalObj);
+						$scope.externalEvents.onItemSelect(finalObj);
+						if ($scope.settings.closeOnSelect) $scope.open = false;
+						if ($scope.settings.selectionLimit > 0 && $scope.selectedModel.length === $scope.settings.selectionLimit) {
+							$scope.externalEvents.onMaxSelectionReached();
+						}
+					}
+				}
+				if (fireSelectionChange) {
+					$scope.externalEvents.onSelectionChanged();
+				}
+				$scope.selectedGroup = null;
 			};
 
 			$scope.setSelectedItem = function(id, dontRemove, fireSelectionChange) {
@@ -335,10 +388,8 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 				if ($scope.singleSelection) {
 					clearObject($scope.selectedModel);
 					angular.extend($scope.selectedModel, finalObj);
-					if (fireSelectionChange) {
-						$scope.externalEvents.onItemSelect(finalObj);
-					}
-					if ($scope.settings.closeOnSelect || $scope.settings.closeOnDeselect) $scope.close();
+					$scope.externalEvents.onItemSelect(finalObj);
+					if ($scope.settings.closeOnSelect || $scope.settings.closeOnDeselect) $scope.open = false;
 				} else {
 					dontRemove = dontRemove || false;
 
@@ -347,13 +398,11 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 					if (!dontRemove && exists) {
 						$scope.selectedModel.splice(findIndex($scope.selectedModel, findObj), 1);
 						$scope.externalEvents.onItemDeselect(findObj);
-						if ($scope.settings.closeOnDeselect) $scope.close();
+						if ($scope.settings.closeOnDeselect) $scope.open = false;
 					} else if (!exists && ($scope.settings.selectionLimit === 0 || $scope.selectedModel.length < $scope.settings.selectionLimit)) {
 						$scope.selectedModel.push(finalObj);
-						if (fireSelectionChange) {
-							$scope.externalEvents.onItemSelect(finalObj);
-						}
-						if ($scope.settings.closeOnSelect) $scope.close();
+						$scope.externalEvents.onItemSelect(finalObj);
+						if ($scope.settings.closeOnSelect) $scope.open = false;
 						if ($scope.settings.selectionLimit > 0 && $scope.selectedModel.length === $scope.settings.selectionLimit) {
 							$scope.externalEvents.onMaxSelectionReached();
 						}
@@ -367,7 +416,7 @@ directiveModule.directive('ngDropdownMultiselect', ['$filter', '$document', '$co
 
 			$scope.isChecked = function(id) {
 				if ($scope.singleSelection) {
-					return $scope.selectedModel !== null && angular.isDefined($scope.selectedModel[$scope.settings.externalIdProp]) && $scope.selectedModel[$scope.settings.externalIdProp] === getFindObj(id)[$scope.settings.externalIdProp];
+					return $scope.selectedModel !== null && angular.isDefined($scope.selectedModel[$scope.settings.idProp]) && $scope.selectedModel[$scope.settings.idProp] === getFindObj(id)[$scope.settings.idProp];
 				}
 
 				return findIndex($scope.selectedModel, getFindObj(id)) !== -1;
